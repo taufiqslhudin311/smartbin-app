@@ -166,6 +166,8 @@ def scan():
                 # Calculate session points
                 influx = check_response.data[0].get('influx', {})
                 session_points = influx.get('plastic_bottle', 0) + (6 * influx.get('can', 0))
+            else:
+                session_points = 0
             
             # Update the waste_input_claim table with user_id
             response = supabase.table("waste_input_claim") \
@@ -193,4 +195,4 @@ def scan():
     return jsonify({'success': False, 'message': 'No QR data received'}), 400
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
