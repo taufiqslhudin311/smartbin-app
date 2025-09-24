@@ -45,9 +45,13 @@ def get_waste_statistics(user_id):
 
 @app.route('/')
 def index():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    return redirect(url_for('scan'))
+    if 'user_id' in session:
+        return redirect(url_for('scan_page'))
+    return render_template('landing.html')
+
+@app.route('/landing')
+def landing():
+    return render_template('landing.html')
 
 @app.route('/scan', methods=['GET'])
 def scan_page():
