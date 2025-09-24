@@ -1,16 +1,15 @@
 from flask import Flask, request, render_template, redirect, url_for, jsonify, session, flash
 from supabase import create_client
 import os
-from datetime import datetime
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs
+
+from config import SUPABASE_URL, SUPABASE_KEY, PLASTIC_BOTTLE_POINT, ALUMINIUM_CAN_POINT
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24)
 
 # Initialize Supabase client
-supabase_url = "https://dvtbrhyjzsnftygioydt.supabase.co"
-supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2dGJyaHlqenNuZnR5Z2lveWR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUyNDUwMzUsImV4cCI6MjA2MDgyMTAzNX0.7bvlFfn8PKj0IupnMEKX4yUT2rEdk-VUOzARv3yMDew"
-supabase = create_client(supabase_url, supabase_key)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_waste_statistics(user_id):
     try:
@@ -33,7 +32,7 @@ def get_waste_statistics(user_id):
             total_plastic_bottles += influx.get('plastic_bottle', 0)
         
         # Calculate total points (1 bottle = 1 point, 1 can = 6 points)
-        total_points = total_plastic_bottles + (6 * total_cans)
+        total_points = PLASTIC_BOTTLE_POINT * total_plastic_bottles + (ALUMINIUM_CAN_POINT * total_cans)
         
         return {
             "can": total_cans,
