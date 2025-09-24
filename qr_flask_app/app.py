@@ -52,6 +52,15 @@ def index():
         return redirect(url_for('scan_page'))
     return render_template('landing.html')
 
+@app.route('/health')
+def health_check():
+    """Simple health check endpoint for deployment testing"""
+    return jsonify({
+        'status': 'healthy',
+        'message': 'SmartBin Flask app is running',
+        'version': '1.0.0'
+    })
+
 @app.route('/landing')
 def landing():
     return render_template('landing.html')
@@ -310,6 +319,9 @@ def scan():
             return jsonify({'success': False, 'message': 'Error processing QR code'}), 500
             
     return jsonify({'success': False, 'message': 'No QR data received'}), 400
+
+# For Vercel deployment
+app.debug = False
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
