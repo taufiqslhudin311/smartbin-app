@@ -1,9 +1,12 @@
 from flask import Flask, request, render_template, redirect, url_for, jsonify, session, flash
 from supabase import create_client
 import os
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
+import requests
+import json
 
-from config import SUPABASE_URL, SUPABASE_KEY, PLASTIC_BOTTLE_POINT, ALUMINIUM_CAN_POINT
+from config import (SUPABASE_URL, SUPABASE_KEY, PLASTIC_BOTTLE_POINT, ALUMINIUM_CAN_POINT,
+                   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI, SUPABASE_AUTH_CALLBACK_URL)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24)
@@ -131,6 +134,116 @@ def logout():
     session.clear()
     flash('You have been logged out', 'success')
     return redirect(url_for('login'))
+
+@app.route('/auth/google')
+def google_auth():
+    """Initiate Google OAuth flow"""
+    if not GOOGLE_CLIENT_ID:
+        flash('Google OAuth not configured', 'error')
+        return redirect(url_for('login'))
+    
+    # Google OAuth URL parameters
+    params = {
+        'client_id': GOOGLE_CLIENT_ID,
+        'redirect_uri': GOOGLE_REDIRECT_URI,
+        'scope': 'openid email profile',
+        'response_type': 'code',
+        'access_type': 'offline',
+        'prompt': 'consent'
+    }
+    
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    return redirect(auth_url)
+
+@app.route('/auth/google/callback')
+def google_callback():
+    """Handle Google OAuth callback"""
+    code = request.args.get('code')
+    error = request.args.get('error')
+    
+    if error:
+        flash(f'Google OAuth error: {error}', 'error')
+        return redirect(url_for('login'))
+    
+    if not code:
+        flash('No authorization code received', 'error')
+        return redirect(url_for('login'))
+    
+    try:
+        # Exchange code for tokens
+        token_data = {
+            'client_id': GOOGLE_CLIENT_ID,
+            'client_secret': GOOGLE_CLIENT_SECRET,
+            'code': code,
+            'grant_type': 'authorization_code',
+            'redirect_uri': GOOGLE_REDIRECT_URI
+        }
+        
+        response = requests.post('https://oauth2.googleapis.com/token', data=token_data)
+        token_response = response.json()
+        
+        if 'access_token' not in token_response:
+            flash('Failed to get access token from Google', 'error')
+            return redirect(url_for('login'))
+        
+        access_token = token_response['access_token']
+        
+        # Get user info from Google
+        user_info_response = requests.get(
+            f'https://www.googleapis.com/oauth2/v2/userinfo?access_token={access_token}'
+        )
+        user_info = user_info_response.json()
+        
+        if 'email' not in user_info:
+            flash('Failed to get user information from Google', 'error')
+            return redirect(url_for('login'))
+        
+        # Check if user exists in Supabase, if not create them
+        email = user_info['email']
+        first_name = user_info.get('given_name', '')
+        last_name = user_info.get('family_name', '')
+        
+        # Query user from Supabase
+        response = supabase.table('user_data').select('*').eq('email', email).execute()
+        
+        if response.data and len(response.data) > 0:
+            # User exists, log them in
+            user = response.data[0]
+            session['user_id'] = user['user_id']
+            session['email'] = user['email']
+            session['first_name'] = user['first_name']
+            session['last_name'] = user['last_name']
+            session['auth_provider'] = 'google'
+        else:
+            # User doesn't exist, create new user
+            user_data = {
+                'email': email,
+                'first_name': first_name,
+                'last_name': last_name,
+                'password': None,  # No password for OAuth users
+                'auth_provider': 'google'
+            }
+            
+            response = supabase.table('user_data').insert(user_data).execute()
+            
+            if response.data:
+                user = response.data[0]
+                session['user_id'] = user['user_id']
+                session['email'] = user['email']
+                session['first_name'] = user['first_name']
+                session['last_name'] = user['last_name']
+                session['auth_provider'] = 'google'
+            else:
+                flash('Error creating user account', 'error')
+                return redirect(url_for('login'))
+        
+        flash('Successfully logged in with Google!', 'success')
+        return redirect(url_for('scan_page'))
+        
+    except Exception as e:
+        flash(f'Error during Google authentication: {str(e)}', 'error')
+        print(f"Google OAuth error: {str(e)}")
+        return redirect(url_for('login'))
 
 @app.route('/api/scan', methods=['POST'])
 def scan():

@@ -6,3 +6,8 @@ pyzbar==0.1.9
 qrcode
 supabase
 gunicorn
+python-dotenv
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+requests
