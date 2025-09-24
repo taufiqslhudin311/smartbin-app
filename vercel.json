@@ -14,5 +14,10 @@
   ],
   "env": {
     "PYTHONPATH": "qr_flask_app"
+  },
+  "functions": {
+    "qr_flask_app/app.py": {
+      "maxDuration": 30
+    }
   }
 }

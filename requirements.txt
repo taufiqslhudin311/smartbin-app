@@ -1,13 +1,10 @@
-opencv-python==4.8.1.78
-pyzbar==0.1.9 
 flask
-opencv-python==4.8.1.78
-pyzbar==0.1.9
-qrcode
 supabase
-gunicorn
 python-dotenv
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
 requests
+qrcode
+# Removed opencv-python and pyzbar - too large for Vercel serverless functions
+# Use alternative QR scanning solutions for production
