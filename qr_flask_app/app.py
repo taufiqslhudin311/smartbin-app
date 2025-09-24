@@ -1,0 +1,197 @@
+from flask import Flask, request, render_template, redirect, url_for, jsonify, session, flash
+from supabase import create_client
+import os
+from datetime import datetime
+from urllib.parse import parse_qs, urlparse
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = os.urandom(24)
+
+# Initialize Supabase client
+supabase_url = "https://dvtbrhyjzsnftygioydt.supabase.co"
+supabase_key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR2dGJyaHlqenNuZnR5Z2lveWR0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUyNDUwMzUsImV4cCI6MjA2MDgyMTAzNX0.7bvlFfn8PKj0IupnMEKX4yUT2rEdk-VUOzARv3yMDew"
+supabase = create_client(supabase_url, supabase_key)
+
+def get_waste_statistics(user_id):
+    try:
+        # Get all waste input claims for the user
+        response = supabase.table("waste_input_claim") \
+            .select("influx") \
+            .eq("user_id", user_id) \
+            .execute()
+        
+        if not response.data:
+            return {"can": 0, "plastic_bottle": 0, "total_points": 0}
+        
+        # Sum up all the waste items
+        total_cans = 0
+        total_plastic_bottles = 0
+        
+        for claim in response.data:
+            influx = claim.get('influx', {})
+            total_cans += influx.get('can', 0)
+            total_plastic_bottles += influx.get('plastic_bottle', 0)
+        
+        # Calculate total points (1 bottle = 1 point, 1 can = 6 points)
+        total_points = total_plastic_bottles + (6 * total_cans)
+        
+        return {
+            "can": total_cans,
+            "plastic_bottle": total_plastic_bottles,
+            "total_points": total_points
+        }
+    except Exception as e:
+        print(f"Error getting waste statistics: {str(e)}")
+        return {"can": 0, "plastic_bottle": 0, "total_points": 0}
+
+@app.route('/')
+def index():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    return redirect(url_for('scan'))
+
+@app.route('/scan', methods=['GET'])
+def scan_page():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    
+    # Get waste statistics for the current user
+    waste_stats = get_waste_statistics(session['user_id'])
+    return render_template('index.html', waste_stats=waste_stats)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        try:
+            # Query user from Supabase with email and password match
+            response = supabase.table('user_data').select('*').eq('email', email).eq('password', password).execute()
+            
+            if response.data and len(response.data) > 0:
+                user = response.data[0]
+                session['user_id'] = user['user_id']  # Store user_id in session
+                session['email'] = user['email']
+                session['first_name'] = user['first_name']
+                session['last_name'] = user['last_name']
+                flash('Login successful!', 'success')
+                return redirect(url_for('scan_page'))  # Redirect to scanner page
+            else:
+                flash('Invalid email or password', 'error')
+        except Exception as e:
+            flash('Error during login', 'error')
+            print(f"Login error: {str(e)}")
+    
+    return render_template('login.html')
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        first_name = request.form.get('first_name')
+        last_name = request.form.get('last_name')
+        password = request.form.get('password')
+        
+        try:
+            # Check if email already exists
+            response = supabase.table('user_data').select('*').eq('email', email).execute()
+            
+            if response.data and len(response.data) > 0:
+                flash('Email already exists', 'error')
+                return redirect(url_for('signup'))
+            
+            # Insert new user into Supabase
+            user_data = {
+                'email': email,
+                'first_name': first_name,
+                'last_name': last_name,
+                'password': password
+            }
+            
+            response = supabase.table('user_data').insert(user_data).execute()
+            
+            if response.data:
+                flash('Account created successfully! Please login.', 'success')
+                return redirect(url_for('login'))
+            else:
+                flash('Error creating account', 'error')
+                
+        except Exception as e:
+            flash('Error during signup', 'error')
+            print(f"Signup error: {str(e)}")
+    
+    return render_template('signup.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('You have been logged out', 'success')
+    return redirect(url_for('login'))
+
+@app.route('/api/scan', methods=['POST'])
+def scan():
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'message': 'Not authenticated'}), 401
+        
+    data = request.json
+    if data and 'qr_data' in data:
+        qr_data = data['qr_data']
+        
+        # Check if QR code matches the expected format
+        if not qr_data.startswith('@SvenX-SmartBin:'):
+            return jsonify({'success': False, 'message': 'Invalid QR code format'}), 400
+            
+        try:
+            # Extract session_id from QR code
+            # Format: @SvenX-SmartBin:session_id=xxx
+            params = parse_qs(qr_data.split(':', 1)[1])
+            session_id = params.get('session_id', [None])[0]
+            
+            if not session_id:
+                return jsonify({'success': False, 'message': 'No session ID found in QR code'}), 400
+            
+            # Check if session has already been claimed
+            check_response = supabase.table("waste_input_claim") \
+                .select("user_id, influx") \
+                .eq("session_id", session_id) \
+                .execute()
+            
+            if check_response.data and len(check_response.data) > 0:
+                if check_response.data[0].get('user_id') is not None:
+                    return jsonify({
+                        'success': False, 
+                        'message': 'Reward Already Claimed'
+                    }), 400
+                
+                # Calculate session points
+                influx = check_response.data[0].get('influx', {})
+                session_points = influx.get('plastic_bottle', 0) + (6 * influx.get('can', 0))
+            
+            # Update the waste_input_claim table with user_id
+            response = supabase.table("waste_input_claim") \
+                .update({"user_id": session['user_id']}) \
+                .eq("session_id", session_id) \
+                .execute()
+            
+            if response.data:
+                # Get updated waste statistics
+                waste_stats = get_waste_statistics(session['user_id'])
+                return jsonify({
+                    'success': True, 
+                    'message': 'QR code scanned and processed successfully',
+                    'session_id': session_id,
+                    'waste_stats': waste_stats,
+                    'session_points': session_points
+                })
+            else:
+                return jsonify({'success': False, 'message': 'Failed to update waste input claim'}), 500
+                
+        except Exception as e:
+            print(f"Error processing QR code: {str(e)}")
+            return jsonify({'success': False, 'message': 'Error processing QR code'}), 500
+            
+    return jsonify({'success': False, 'message': 'No QR data received'}), 400
+
+if __name__ == '__main__':
+    app.run(debug=True)
